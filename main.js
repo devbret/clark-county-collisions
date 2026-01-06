@@ -1,0 +1,555 @@
+const map = L.map("map", { preferCanvas: true }).setView(
+  [45.638, -122.661],
+  12
+);
+
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19,
+  attribution: "&copy; OpenStreetMap contributors",
+}).addTo(map);
+
+const radiusEl = document.getElementById("radius");
+const blurEl = document.getElementById("blur");
+const radiusVal = document.getElementById("radiusVal");
+const blurVal = document.getElementById("blurVal");
+const statsEl = document.getElementById("stats");
+const fitBtn = document.getElementById("fit");
+const toggleBtn = document.getElementById("toggle");
+
+let heatLayer = null;
+let heatVisible = true;
+let heatPoints = [];
+let bounds = null;
+
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function computeIntensity(row) {
+  const inj = Number(row.NumInjuries ?? 0) || 0;
+  const fat = Number(row.NumFatalities ?? 0) || 0;
+
+  const sev = normalizeStr(row.MostSevereInjType).toLowerCase();
+  let sevW = 0;
+  if (sev.includes("serious")) sevW = 1.5;
+  else if (sev.includes("minor")) sevW = 0.6;
+  else if (sev.includes("possible")) sevW = 0.3;
+
+  const w = 1 + inj * 0.35 + fat * 2.0 + sevW;
+  return clamp(w, 0.5, 6);
+}
+
+function buildHeatLayer() {
+  const radius = Number(radiusEl.value);
+  const blur = Number(blurEl.value);
+
+  if (heatLayer) heatLayer.remove();
+
+  heatLayer = L.heatLayer(heatPoints, {
+    radius,
+    blur,
+    maxZoom: 17,
+  }).addTo(map);
+
+  heatVisible = true;
+  toggleBtn.textContent = "Toggle Heat";
+  toggleBtn.style.background = "#444";
+}
+
+function updateHeatStyleOnly() {
+  buildHeatLayer();
+}
+
+function fitToData() {
+  if (bounds) map.fitBounds(bounds.pad(0.05));
+}
+
+function toggleHeat() {
+  if (!heatLayer) return;
+
+  if (heatVisible) {
+    heatLayer.remove();
+    heatVisible = false;
+    toggleBtn.textContent = "Show Heat";
+    toggleBtn.style.background = "#111";
+  } else {
+    heatLayer.addTo(map);
+    heatVisible = true;
+    toggleBtn.textContent = "Hide Heat";
+    toggleBtn.style.background = "#444";
+  }
+}
+
+let rawData = [];
+let filteredData = [];
+let filterUIReady = false;
+
+const filters = {
+  yearMin: null,
+  yearMax: null,
+  injuriesMin: null,
+  injuriesMax: null,
+  fatalitiesMin: null,
+  fatalitiesMax: null,
+  weather: new Set(),
+  lighting: new Set(),
+  severity: new Set(),
+  text: "",
+};
+
+function uniqSorted(arr) {
+  return Array.from(new Set(arr.filter(Boolean))).sort((a, b) =>
+    String(a).localeCompare(String(b))
+  );
+}
+
+function toNum(v, fallback = null) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function inRange(n, min, max) {
+  if (!Number.isFinite(n)) return false;
+  if (min != null && n < min) return false;
+  if (max != null && n > max) return false;
+  return true;
+}
+
+function normalizeStr(s) {
+  return String(s ?? "").trim();
+}
+
+function rebuildHeatFromFiltered({ fit = true } = {}) {
+  heatPoints = [];
+  const latlngs = [];
+
+  for (const row of filteredData) {
+    const lat = Number(row.lat);
+    const lon = Number(row.lon);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) continue;
+
+    heatPoints.push([lat, lon, computeIntensity(row)]);
+    latlngs.push([lat, lon]);
+  }
+
+  bounds = latlngs.length ? L.latLngBounds(latlngs) : null;
+
+  const wasVisible = heatVisible;
+
+  buildHeatLayer();
+
+  if (!wasVisible && heatLayer) {
+    heatLayer.remove();
+    heatVisible = false;
+    toggleBtn.textContent = "Show Heat";
+    toggleBtn.style.background = "#111";
+  }
+
+  if (fit && bounds) map.fitBounds(bounds.pad(0.05));
+}
+
+function applyFilters({ fit = false } = {}) {
+  const q = normalizeStr(filters.text).toLowerCase();
+
+  filteredData = rawData.filter((row) => {
+    const y = toNum(row.CollYear, NaN);
+    const inj = toNum(row.NumInjuries, 0);
+    const fat = toNum(row.NumFatalities, 0);
+
+    if (filters.yearMin != null || filters.yearMax != null) {
+      if (!inRange(y, filters.yearMin, filters.yearMax)) return false;
+    }
+    if (filters.injuriesMin != null || filters.injuriesMax != null) {
+      if (!inRange(inj, filters.injuriesMin, filters.injuriesMax)) return false;
+    }
+    if (filters.fatalitiesMin != null || filters.fatalitiesMax != null) {
+      if (!inRange(fat, filters.fatalitiesMin, filters.fatalitiesMax))
+        return false;
+    }
+
+    const weather = normalizeStr(row.Weather);
+    const lighting = normalizeStr(row.LightingCond);
+    const severity = normalizeStr(row.MostSevereInjType);
+
+    if (filters.weather.size && !filters.weather.has(weather)) return false;
+    if (filters.lighting.size && !filters.lighting.has(lighting)) return false;
+    if (filters.severity.size && !filters.severity.has(severity)) return false;
+
+    if (q) {
+      const hay = `${weather} ${lighting} ${severity}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+
+    return true;
+  });
+
+  updateStats();
+  rebuildHeatFromFiltered({ fit });
+}
+
+function updateStats() {
+  const total = rawData.length;
+  const shown = filteredData.length;
+
+  const injSum = filteredData.reduce(
+    (a, r) => a + (Number(r.NumInjuries) || 0),
+    0
+  );
+  const fatSum = filteredData.reduce(
+    (a, r) => a + (Number(r.NumFatalities) || 0),
+    0
+  );
+
+  statsEl.textContent =
+    `Records: ${shown} / ${total}\n` +
+    `Total Injuries: ${injSum}\n` +
+    `Total Fatalities: ${fatSum}`;
+}
+
+function addDivider(panel) {
+  const hr = document.createElement("div");
+  hr.style.height = "1px";
+  hr.style.background = "rgba(0,0,0,0.08)";
+  hr.style.margin = "10px 0";
+  panel.appendChild(hr);
+}
+
+const filterControls = {
+  yearMinInput: null,
+  yearMaxInput: null,
+  injuriesMinInput: null,
+  injuriesMaxInput: null,
+  fatalitiesMinInput: null,
+  fatalitiesMaxInput: null,
+  weatherSelect: null,
+  lightingSelect: null,
+  severitySelect: null,
+  textInput: null,
+};
+
+function makeSelectList(title, items, onChange, assignRef) {
+  const wrap = document.createElement("div");
+  wrap.style.marginTop = "10px";
+
+  const label = document.createElement("div");
+  label.className = "muted";
+  label.style.marginBottom = "6px";
+  label.textContent = title;
+
+  const select = document.createElement("select");
+  select.multiple = true;
+  select.size = Math.min(6, Math.max(3, items.length));
+  select.style.width = "100%";
+  select.style.padding = "6px";
+  select.style.borderRadius = "8px";
+  select.style.border = "1px solid rgba(0,0,0,0.15)";
+
+  for (const v of items) {
+    const opt = document.createElement("option");
+    opt.value = v;
+    opt.textContent = v;
+    select.appendChild(opt);
+  }
+
+  select.addEventListener("change", () => {
+    const selected = new Set(
+      Array.from(select.selectedOptions).map((o) => o.value)
+    );
+    onChange(selected);
+    applyFilters({ fit: false });
+  });
+
+  if (typeof assignRef === "function") assignRef(select);
+
+  wrap.appendChild(label);
+  wrap.appendChild(select);
+  return wrap;
+}
+
+function makeNumberRange(
+  title,
+  placeholderMin,
+  placeholderMax,
+  step,
+  onApply,
+  assignRefs
+) {
+  const wrap = document.createElement("div");
+  wrap.style.marginTop = "10px";
+
+  const label = document.createElement("div");
+  label.className = "muted";
+  label.style.marginBottom = "6px";
+  label.textContent = title;
+
+  const row = document.createElement("div");
+  row.className = "row";
+  row.style.margin = "6px 0 0 0";
+
+  const minInput = document.createElement("input");
+  minInput.type = "number";
+  minInput.step = String(step ?? 1);
+  minInput.placeholder = String(placeholderMin);
+  minInput.style.width = "90px";
+
+  const maxInput = document.createElement("input");
+  maxInput.type = "number";
+  maxInput.step = String(step ?? 1);
+  maxInput.placeholder = String(placeholderMax);
+  maxInput.style.width = "90px";
+
+  const applyBtn = document.createElement("button");
+  applyBtn.type = "button";
+  applyBtn.className = "btn";
+  applyBtn.textContent = "Apply";
+  applyBtn.style.background = "#111";
+  applyBtn.style.padding = "6px 10px";
+
+  function doApply() {
+    const minN = minInput.value === "" ? null : toNum(minInput.value, null);
+    const maxN = maxInput.value === "" ? null : toNum(maxInput.value, null);
+    onApply(minN, maxN);
+    applyFilters({ fit: false });
+  }
+
+  applyBtn.addEventListener("click", doApply);
+  minInput.addEventListener("keydown", (e) => e.key === "Enter" && doApply());
+  maxInput.addEventListener("keydown", (e) => e.key === "Enter" && doApply());
+
+  if (typeof assignRefs === "function") assignRefs(minInput, maxInput);
+
+  row.appendChild(minInput);
+  row.appendChild(maxInput);
+  row.appendChild(applyBtn);
+
+  wrap.appendChild(label);
+  wrap.appendChild(row);
+  return wrap;
+}
+
+function makeSearchBox(title, onChange, assignRef) {
+  const wrap = document.createElement("div");
+  wrap.style.marginTop = "10px";
+
+  const label = document.createElement("div");
+  label.className = "muted";
+  label.style.marginBottom = "6px";
+  label.textContent = title;
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.placeholder = "overcast, dusk, serious...";
+  input.style.width = "346px";
+  input.style.padding = "7px 8px";
+  input.style.borderRadius = "8px";
+  input.style.border = "1px solid rgba(0,0,0,0.15)";
+
+  input.addEventListener("input", () => {
+    onChange(input.value);
+    applyFilters({ fit: false });
+  });
+
+  if (typeof assignRef === "function") assignRef(input);
+
+  wrap.appendChild(label);
+  wrap.appendChild(input);
+  return wrap;
+}
+
+function makeResetAllButton(onClick) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn";
+  btn.textContent = "Reset All filters";
+  btn.style.background = "#7a2cff";
+  btn.style.marginTop = "12px";
+  btn.style.width = "100%";
+  btn.addEventListener("click", onClick);
+  return btn;
+}
+
+function resetAllFilters() {
+  filters.yearMin = filters.yearMax = null;
+  filters.injuriesMin = filters.injuriesMax = null;
+  filters.fatalitiesMin = filters.fatalitiesMax = null;
+  filters.weather = new Set();
+  filters.lighting = new Set();
+  filters.severity = new Set();
+  filters.text = "";
+
+  if (filterControls.yearMinInput) filterControls.yearMinInput.value = "";
+  if (filterControls.yearMaxInput) filterControls.yearMaxInput.value = "";
+  if (filterControls.injuriesMinInput)
+    filterControls.injuriesMinInput.value = "";
+  if (filterControls.injuriesMaxInput)
+    filterControls.injuriesMaxInput.value = "";
+  if (filterControls.fatalitiesMinInput)
+    filterControls.fatalitiesMinInput.value = "";
+  if (filterControls.fatalitiesMaxInput)
+    filterControls.fatalitiesMaxInput.value = "";
+
+  const clearMulti = (sel) => {
+    if (!sel) return;
+    for (const opt of sel.options) opt.selected = false;
+  };
+  clearMulti(filterControls.weatherSelect);
+  clearMulti(filterControls.lightingSelect);
+  clearMulti(filterControls.severitySelect);
+
+  if (filterControls.textInput) filterControls.textInput.value = "";
+
+  applyFilters({ fit: false });
+}
+
+function buildFilterUIFromData() {
+  if (filterUIReady) return;
+
+  const panel = document.querySelector(".panel");
+  if (!panel) return;
+
+  addDivider(panel);
+
+  const years = rawData
+    .map((r) => toNum(r.CollYear, null))
+    .filter((n) => n != null);
+  const yearMin = years.length ? Math.min(...years) : 0;
+  const yearMax = years.length ? Math.max(...years) : 0;
+
+  const injuries = rawData.map((r) => toNum(r.NumInjuries, 0));
+  const fatalities = rawData.map((r) => toNum(r.NumFatalities, 0));
+  const injMin = injuries.length ? Math.min(...injuries) : 0;
+  const injMax = injuries.length ? Math.max(...injuries) : 0;
+  const fatMin = fatalities.length ? Math.min(...fatalities) : 0;
+  const fatMax = fatalities.length ? Math.max(...fatalities) : 0;
+
+  const weathers = uniqSorted(rawData.map((r) => r.Weather));
+  const lightings = uniqSorted(rawData.map((r) => r.LightingCond));
+  const severities = uniqSorted(rawData.map((r) => r.MostSevereInjType));
+
+  panel.appendChild(
+    makeNumberRange(
+      "Year",
+      yearMin,
+      yearMax,
+      1,
+      (minN, maxN) => {
+        filters.yearMin = minN;
+        filters.yearMax = maxN;
+      },
+      (minEl, maxEl) => {
+        filterControls.yearMinInput = minEl;
+        filterControls.yearMaxInput = maxEl;
+      }
+    )
+  );
+
+  panel.appendChild(
+    makeNumberRange(
+      "Injuries",
+      injMin,
+      injMax,
+      1,
+      (minN, maxN) => {
+        filters.injuriesMin = minN;
+        filters.injuriesMax = maxN;
+      },
+      (minEl, maxEl) => {
+        filterControls.injuriesMinInput = minEl;
+        filterControls.injuriesMaxInput = maxEl;
+      }
+    )
+  );
+
+  panel.appendChild(
+    makeNumberRange(
+      "Fatalities",
+      fatMin,
+      fatMax,
+      1,
+      (minN, maxN) => {
+        filters.fatalitiesMin = minN;
+        filters.fatalitiesMax = maxN;
+      },
+      (minEl, maxEl) => {
+        filterControls.fatalitiesMinInput = minEl;
+        filterControls.fatalitiesMaxInput = maxEl;
+      }
+    )
+  );
+
+  panel.appendChild(
+    makeSelectList(
+      "Weather",
+      weathers,
+      (set) => (filters.weather = set),
+      (sel) => (filterControls.weatherSelect = sel)
+    )
+  );
+
+  panel.appendChild(
+    makeSelectList(
+      "Lighting",
+      lightings,
+      (set) => (filters.lighting = set),
+      (sel) => (filterControls.lightingSelect = sel)
+    )
+  );
+
+  panel.appendChild(
+    makeSelectList(
+      "Severity",
+      severities,
+      (set) => (filters.severity = set),
+      (sel) => (filterControls.severitySelect = sel)
+    )
+  );
+
+  panel.appendChild(
+    makeSearchBox(
+      "Text Contains",
+      (txt) => (filters.text = txt),
+      (input) => (filterControls.textInput = input)
+    )
+  );
+
+  panel.appendChild(makeResetAllButton(resetAllFilters));
+
+  filterUIReady = true;
+}
+
+async function loadData() {
+  const res = await fetch("./collisions_latlon_min.json", {
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to load JSON: ${res.status} ${res.statusText}`);
+  }
+
+  rawData = await res.json();
+
+  buildFilterUIFromData();
+
+  filteredData = rawData.slice();
+
+  updateStats();
+  rebuildHeatFromFiltered({ fit: true });
+}
+
+radiusEl.addEventListener(
+  "input",
+  () => (radiusVal.textContent = radiusEl.value)
+);
+blurEl.addEventListener("input", () => (blurVal.textContent = blurEl.value));
+
+radiusEl.addEventListener("change", updateHeatStyleOnly);
+blurEl.addEventListener("change", updateHeatStyleOnly);
+
+fitBtn.addEventListener("click", fitToData);
+toggleBtn.addEventListener("click", toggleHeat);
+
+loadData().catch((err) => {
+  console.error(err);
+  statsEl.textContent = `Error:\n${err.message}\n\nMake sure you're serving via HTTP (not file://).`;
+});
