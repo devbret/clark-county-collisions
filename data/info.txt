@@ -1,1 +1,1 @@
-Place the source data in this directory.
+Place the source data file in this directory.

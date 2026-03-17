@@ -1,6 +1,6 @@
 const map = L.map("map", { preferCanvas: true }).setView(
   [45.638, -122.661],
-  12
+  12,
 );
 
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -99,7 +99,7 @@ const filters = {
 
 function uniqSorted(arr) {
   return Array.from(new Set(arr.filter(Boolean))).sort((a, b) =>
-    String(a).localeCompare(String(b))
+    String(a).localeCompare(String(b)),
   );
 }
 
@@ -195,11 +195,11 @@ function updateStats() {
 
   const injSum = filteredData.reduce(
     (a, r) => a + (Number(r.NumInjuries) || 0),
-    0
+    0,
   );
   const fatSum = filteredData.reduce(
     (a, r) => a + (Number(r.NumFatalities) || 0),
-    0
+    0,
   );
 
   statsEl.textContent =
@@ -255,7 +255,7 @@ function makeSelectList(title, items, onChange, assignRef) {
 
   select.addEventListener("change", () => {
     const selected = new Set(
-      Array.from(select.selectedOptions).map((o) => o.value)
+      Array.from(select.selectedOptions).map((o) => o.value),
     );
     onChange(selected);
     applyFilters({ fit: false });
@@ -274,7 +274,7 @@ function makeNumberRange(
   placeholderMax,
   step,
   onApply,
-  assignRefs
+  assignRefs,
 ) {
   const wrap = document.createElement("div");
   wrap.style.marginTop = "10px";
@@ -441,8 +441,8 @@ function buildFilterUIFromData() {
       (minEl, maxEl) => {
         filterControls.yearMinInput = minEl;
         filterControls.yearMaxInput = maxEl;
-      }
-    )
+      },
+    ),
   );
 
   panel.appendChild(
@@ -458,8 +458,8 @@ function buildFilterUIFromData() {
       (minEl, maxEl) => {
         filterControls.injuriesMinInput = minEl;
         filterControls.injuriesMaxInput = maxEl;
-      }
-    )
+      },
+    ),
   );
 
   panel.appendChild(
@@ -475,8 +475,8 @@ function buildFilterUIFromData() {
       (minEl, maxEl) => {
         filterControls.fatalitiesMinInput = minEl;
         filterControls.fatalitiesMaxInput = maxEl;
-      }
-    )
+      },
+    ),
   );
 
   panel.appendChild(
@@ -484,8 +484,8 @@ function buildFilterUIFromData() {
       "Weather",
       weathers,
       (set) => (filters.weather = set),
-      (sel) => (filterControls.weatherSelect = sel)
-    )
+      (sel) => (filterControls.weatherSelect = sel),
+    ),
   );
 
   panel.appendChild(
@@ -493,8 +493,8 @@ function buildFilterUIFromData() {
       "Lighting",
       lightings,
       (set) => (filters.lighting = set),
-      (sel) => (filterControls.lightingSelect = sel)
-    )
+      (sel) => (filterControls.lightingSelect = sel),
+    ),
   );
 
   panel.appendChild(
@@ -502,16 +502,16 @@ function buildFilterUIFromData() {
       "Severity",
       severities,
       (set) => (filters.severity = set),
-      (sel) => (filterControls.severitySelect = sel)
-    )
+      (sel) => (filterControls.severitySelect = sel),
+    ),
   );
 
   panel.appendChild(
     makeSearchBox(
       "Text Contains",
       (txt) => (filters.text = txt),
-      (input) => (filterControls.textInput = input)
-    )
+      (input) => (filterControls.textInput = input),
+    ),
   );
 
   panel.appendChild(makeResetAllButton(resetAllFilters));
@@ -539,7 +539,7 @@ async function loadData() {
 
 radiusEl.addEventListener(
   "input",
-  () => (radiusVal.textContent = radiusEl.value)
+  () => (radiusVal.textContent = radiusEl.value),
 );
 blurEl.addEventListener("input", () => (blurVal.textContent = blurEl.value));
 
