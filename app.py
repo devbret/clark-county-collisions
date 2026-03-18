@@ -1,7 +1,7 @@
 import pandas as pd
 from pyproj import Transformer
 
-INPUT_CSV = "./data/collisions.csv"
+INPUT_CSV = "./data/Collisions.csv"
 OUTPUT_JSON = "collisions_latlon_min.json"
 
 SOURCE_CRS = "EPSG:2286"
