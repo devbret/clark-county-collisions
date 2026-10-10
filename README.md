@@ -6,7 +6,7 @@ Convert collision coordinate data from Clark County, WA into JSON and visualize 
 
 ## Application Overview
 
-Tansforms traffic collision data into an interactive, filterable heatmap using Python and a JavaScript frontend. In order to accomplish this the Python script processes a CSV file containing coordinates, cleans the data and outputs a JSON file with the fields required for visualization.
+Transforms traffic collision data into an interactive, filterable heatmap using Python and a JavaScript frontend. In order to accomplish this the Python script processes a CSV file containing coordinates, cleans the data and outputs a JSON file with the fields required for visualization.
 
 Next a JavaScript-based Leaflet map renders the processed data as a heat layer where intensity reflects collision severity. A control panel allows users to filter collisions by year, injury and fatality counts, weather, lighting, severity and text search. Additional controls allow users to adjust heat radius and blur, toggle the heat layer and automatically fit displayed data onto the screen.
 
@@ -68,6 +68,6 @@ This project repo is intended to demonstrate an ability to do the following:
 
 ### License Information
 
-This project is licensed under the MIT License. This license allows for the use of, modification of and distribution of this software, provided that the copyright notice and the copyright notice are included in all copies or substantial portions of the software. For more details, please refer to the [LICENSE](LICENSE) file.
+This project is licensed under the MIT License. This license allows for the use of, modification of and distribution of this software, provided the copyright notice is included in all copies or substantial portions of the software. For more details, please refer to the [LICENSE](LICENSE) file.
 
 If you have any questions or would like to collaborate, please reach out either on GitHub or via [my website](https://bretbernhoft.com/).
